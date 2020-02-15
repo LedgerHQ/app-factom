@@ -33,7 +33,7 @@
 //header Entry Commit
 typedef struct txEcContent_t {
     uint8_t version;
-    uint8_t *timestamp_ms;
+//    uint8_t *timestamp_ms;
     uint8_t *entryhash;
     uint8_t numec;
     uint8_t *ecpubkey;

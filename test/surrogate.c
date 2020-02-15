@@ -1,9 +1,16 @@
+#define USB_SEGMENT_SIZE  128
+#define IO_HID_EP_LENGTH 128
+
 #include "os.h"
 #include "cx.h"
 #include "btchip_secure_value.h"
 
 #include <openssl/sha.h>
 try_context_t *G_try_last_open_context;
+void os_longjmp(unsigned int exception)
+{
+    exit(0);
+}
 
 void btchip_commit_operation_mode(secu8 operationMode)
 {
@@ -111,14 +118,23 @@ void os_memmove(void *dst, const void WIDE *src,
 {
     memmove(dst,src,length);
 }
-int cx_hash(cx_hash_t *hash PLENGTH(scc__cx_hash_ctx_size__hash),
-                    int mode, unsigned char WIDE *in PLENGTH(len),
-                    unsigned int len,
-                    unsigned char *out PLENGTH(scc__cx_hash_size__hash))
+int cx_hash(cx_hash_t *hash PLENGTH(scc__cx_scc_struct_size_hash__hash),
+                    int mode, const unsigned char WIDE *in PLENGTH(len),
+                    unsigned int len, unsigned char *out PLENGTH(out_len),
+                    unsigned int out_len)
+
+//int cx_hash(cx_hash_t *hash PLENGTH(scc__cx_hash_ctx_size__hash),
+//                    int mode, unsigned char WIDE *in PLENGTH(len),
+//                    unsigned int len,
+//                    unsigned char *out PLENGTH(scc__cx_hash_size__hash))
 {
 
 }
-int cx_hash_sha256 ( unsigned char * in, unsigned int len, unsigned char * out )
+SYSCALL int cx_hash_sha256(const unsigned char WIDE *in PLENGTH(len),
+                           unsigned int len,
+                           unsigned char *out PLENGTH(out_len),
+                           unsigned int out_len)
+
 
 {
 
@@ -152,7 +168,9 @@ int cx_hash_sha256 ( unsigned char * in, unsigned int len, unsigned char * out )
   return (int)ret;
 }
 
-int cx_keccak_init ( cx_sha3_t * hash, int size )
+int cx_keccak_init(cx_sha3_t *hash PLENGTH(sizeof(cx_sha3_t)),
+                           unsigned int size)
+
 {
   unsigned int ret = 0;
 //  unsigned int parameters [2+2];

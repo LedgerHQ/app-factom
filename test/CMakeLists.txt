@@ -4,23 +4,25 @@ PROJECT(fctparse C)
 
 SET(EXE_NAME fctparse)
 
-SET(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} -fpermissive)
-SET(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -fpermissive)
+SET(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} -fpermissive )
+SET(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -fpermissive )
 
+add_definitions(-DUSB_SEGMENT_SIZE=128 -DIO_HID_EP_LENGTH=128)
 INCLUDE_DIRECTORIES("${PROJECT_BINARY_DIR}"
                     ../src/
                     $ENV{BOLOS_SDK}/include
 )
 
 SET(CONVERT_LIBS 
-      stdc++
       crypto
+      stdc++
    )              
 
 
 ADD_EXECUTABLE(${EXE_NAME}
     main.c
     surrogate.c
+    ../src/fatParse.c
     ../src/fctParse.h
     ../src/fctParse.c
     ../src/ecParse.h
@@ -37,7 +39,7 @@ ADD_EXECUTABLE(${EXE_NAME}
 
 SET_TARGET_PROPERTIES(${EXE_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-TARGET_LINK_LIBRARIES(${EXE_NAME})
+TARGET_LINK_LIBRARIES(${EXE_NAME} ${CONVERT_LIBS})
 
 IF(UNIX)
 

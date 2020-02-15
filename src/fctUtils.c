@@ -32,6 +32,7 @@
 
 
 const uint32_t MAX_TXN_SIZE = 10275;
+const uint32_t fct_address_length = 52;
 
 void getFctAddressFromKey(cx_ecfp_public_key_t *publicKey, uint8_t *out,
                           cx_sha3_t *sha3Context) 
@@ -355,10 +356,11 @@ unsigned short fct_print_amount(uint64_t amount, int8_t *out,
 uint64_t varint_decode(uint8_t *data, uint32_t maxlen, uint8_t *bytes)
 {
 
-    uint64_t ret = 0;
+    uint64_t ret = 0xFFFFFFFF;
     if ( !data || !bytes ) return ret;
 
     *bytes = 0;
+    ret = 0;
     do
     {
         ret = ret << 7;

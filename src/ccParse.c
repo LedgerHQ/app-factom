@@ -30,7 +30,7 @@ parserStatus_e parseCcTxV0(uint8_t *data, uint32_t length, txCcContent_t *contex
     }
 
     //parse timestamp.  not really concerned about this here.
-    context->timestamp_ms = &data[*offset];
+//    context->timestamp_ms = &data[*offset];
     *offset += 6;
 
 
@@ -131,7 +131,7 @@ error:
 void initCcContent(txCcContent_t *content)
 {
     content->ecpubkey = 0;
-    content->timestamp_ms = 0;
+//    content->timestamp_ms = 0;
     content->entryhash = 0;
     content->chainhash = 0;
     content->chainweld = 0;

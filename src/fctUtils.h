@@ -73,10 +73,17 @@ typedef enum {
     PRIVATE_OFFSEST_EC = 3,
     PUBLIC_OFFSET_ID = 4,
     PRIVATE_OFFSET_ID = 5,
+    PUBLIC_OFFSET_FCT_FAT = 0x80,
     LAST_KEY_TYPE
 }  keyType_t;
 
+
+
+extern const uint32_t fct_address_length;
+
 extern const uint32_t MAX_TXN_SIZE;
+#define FCT_ADDRESS_LENGTH 52
+
 
 void sha256d(uint8_t *data, uint32_t len, uint8_t *out, uint32_t outlen);
 

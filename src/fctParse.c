@@ -70,7 +70,7 @@ parserStatus_e parseTxV2(uint8_t *data, uint32_t length, txContent_t *context, u
     }
 
     //parse timestamp.  not really concerned about this here.
-    context->header.timestamp_ms = &data[*offset];
+//    context->header.timestamp_ms = &data[*offset];
     *offset += 6;
 
     if ( *offset > length )
@@ -121,7 +121,7 @@ parserStatus_e parseTxV2(uint8_t *data, uint32_t length, txContent_t *context, u
     uint64_t inputvalue = 0;
     result = parseTxAddress(data, length,
                             context->header.inputcount,
-                            context->inputs,
+                            0, //context->inputs,
                             &inputvalue,
                             offset);
 
@@ -143,7 +143,7 @@ parserStatus_e parseTxV2(uint8_t *data, uint32_t length, txContent_t *context, u
 
     result = parseTxAddress(data, length,
                             context->header.ecpurchasecount,
-                            context->ecpurchase,
+                            context->t.ecpurchase,
                             &outputvalue,
                             offset);
     if ( result != USTREAM_FINISHED )
@@ -175,16 +175,21 @@ parserStatus_e parseTxAddress(uint8_t *data, uint32_t length,
     {
         int8_t bytes = 0;
         int32_t diff = length-*offset;
-        context[i].value = varint_decode(&data[*offset],diff>8?8:diff, &bytes);
+        uint64_t v = varint_decode(&data[*offset],diff>8?8:diff, &bytes);
+        if ( context )
+        {
+            context[i].amt.value = v;
+        }
         *offset += bytes;
 
-        if ( context[i].value == 0 )
+
+        if ( v == 0xFFFFFFFF )
         {
             result = USTREAM_FAULT_VALUE;
             break;//out of bounds -- bad varint
         }
 
-        *value += context[i].value;
+        *value += v;
 
         if ( *offset+32 > length )
         {
@@ -192,7 +197,10 @@ parserStatus_e parseTxAddress(uint8_t *data, uint32_t length,
             break;
         }
 
-        context[i].rcdhash =  &data[*offset];
+        if ( context )
+        {
+            context[i].addr.rcdhash =  &data[*offset];
+        }
         *offset+=32;
 
     }
@@ -238,28 +246,28 @@ error:
 
 void initContent(txContent_t *content)
 {
-    content->header.timestamp_ms = NULL;
+//    content->header.timestamp_ms = NULL;
     content->header.inputcount = 0;
     content->header.outputcount = 0;
     content->header.ecpurchasecount = 0;
     content->header.fee = 0;
 
-    for ( int i = 0; i < MAX_INPUT_ADDRESSES; ++i )
-    {
-        content->inputs[i].value = 0;
-        content->inputs[i].rcdhash = NULL;
-    }
+//    for ( int i = 0; i < MAX_INPUT_ADDRESSES; ++i )
+//    {
+//        content->inputs[i].amt.value = 0;
+//        content->inputs[i].addr.rcdhash = NULL;
+//    }
 
 
     for ( int i = 0; i < MAX_OUTPUT_ADDRESSES; ++i )
     {
-        content->outputs[i].value = 0;
-        content->outputs[i].rcdhash = NULL;
+        content->outputs[i].amt.value = 0;
+        content->outputs[i].addr.rcdhash = NULL;
     }
     for ( int i = 0; i < MAX_ECOUTPUT_ADDRESSES; ++i )
     {
-        content->ecpurchase[i].value = 0;
-        content->ecpurchase[i].rcdhash = NULL;
+        content->t.ecpurchase[i].amt.value = 0;
+        content->t.ecpurchase[i].addr.rcdhash = NULL;
     }
 }
 
@@ -286,3 +294,6 @@ parserStatus_e parseTx(uint8_t *data, uint32_t length,
     */
     return result;
 }
+
+
+

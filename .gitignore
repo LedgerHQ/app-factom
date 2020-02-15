@@ -2,6 +2,8 @@ debug/
 dep/
 obj/ 
 bin/
+test-build/
 ledger-factomjs/node_modules
 src/glyphs.c
 src/glyphs.h
+

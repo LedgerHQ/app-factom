@@ -33,7 +33,7 @@
 //header Chain Commit
 typedef struct txCcContent_t {
     uint8_t version;
-    uint8_t *timestamp_ms;
+//    uint8_t *timestamp_ms;
     uint8_t *chainhash;
     uint8_t *chainweld;
     uint8_t *entryhash;

@@ -73,6 +73,7 @@ uint32_t set_result_get_publicKey(void);
 #define INS_SIGN_MESSAGE_HASH 0x14
 #define INS_SIGN_RAW_MESSAGE_WITH_ID 0x16
 #define INS_STORE_CHAIN_ID 0x18
+#define INS_SIGN_FAT 0x20
 
 #define COIN_TYPE_ID  281
 #define COIN_TYPE_EC 132
@@ -121,16 +122,10 @@ typedef struct chainidContext_t {
 #define HEADER_TYPE_COMMITSIGN 2
 #define HEADER_TYPE_MSGSIGN 3 
 #define HEADER_TYPE_RAWSIGN 4 
+#define HEADER_TYPE_FATSIGN 4
 
-typedef struct transactionContext_t {
-    uint8_t headervalid;
-    uint8_t pathLength;
-    uint32_t bip32Path[MAX_BIP32_PATH];
-    uint8_t rawTx[MAX_RAW_TX];
-    uint32_t rawTxLength;
-} transactionContext_t;
 
-typedef struct sha256_t { 
+typedef struct sha256_t {
     cx_sha256_t context;
     uint8_t hash[32];
 } sha256_t;
@@ -138,13 +133,22 @@ typedef struct sha256_t {
 typedef struct sha512_t {
     cx_sha512_t context;
     uint8_t hash[64];
-} sha512_t; 
-	
+} sha512_t;
+
 
 typedef union hashCtx_t {
     sha256_t sha256;
     sha512_t sha512;
 } hashCtx_t;
+
+typedef struct transactionContext_t {
+    uint8_t headervalid;
+    uint8_t pathLength;
+    uint32_t bip32Path[MAX_BIP32_PATH];
+    uint8_t rawTx[MAX_RAW_TX];
+    uint32_t rawTxLength;
+    hashCtx_t hashCtx;//added to support FAT signing.
+} transactionContext_t;
 
 typedef struct messageSigningContext_t {
     uint8_t headervalid;
@@ -153,6 +157,14 @@ typedef struct messageSigningContext_t {
     uint32_t bip32Path[MAX_BIP32_PATH];
     hashCtx_t hashCtx;
 } messageSigningContext_t;
+
+
+typedef struct internalStorage_t {
+    uint8_t dataAllowed;
+    uint8_t fidoTransport;
+    uint8_t initialized;
+    uint8_t chainid[32];
+} internalStorage_t;
 
 //typedef struct rawMessageSigningContext_t {
 //    uint8_t headervalid;
@@ -170,24 +182,23 @@ union {
 //    rawMessageSigningContext_t rawMessageSigningContext;
 } tmpCtx;
 
-txContent_t txContent;
 
-uint8_t batchModeEnabled = 0;
-
-union {
-    txContent_t txContent;
-    cx_sha256_t sha2;
-} tmpContent;
-
-//fct/ec address length is 52, id length is 55
-#define FCT_ADDRESS_LENGTH 55
-
+volatile txContent_t txContent;
+volatile uint8_t batchModeEnabled = 0;
 volatile uint8_t dataAllowed;
-volatile uint8_t fidoTransport;
-volatile char fullAddress[FCT_ADDRESS_LENGTH+1];
-volatile char addressSummary[32];
-volatile char fullAmount[32];
+volatile char confirm_string[16];
 volatile char maxFee[16];
+
+struct {
+    volatile char fullAddress[FCT_ADDRESS_LENGTH+1];
+    volatile char addressSummary[16];
+    volatile char fullAmount[16];
+} outstr;
+
+//volatile const char *outstr.fullAddress = outstr.outstr.fullAddress;
+//volatile const char *outstr.addressSummary = outstr.outstr.addressSummary;
+//volatile const char *outstr.fullAmount = outstr.outstr.fullAmount;
+
 volatile bool dataPresent;
 volatile bool skipWarning;
 volatile uint8_t addresses_type[MAX_OUTPUTS];
@@ -195,24 +206,19 @@ volatile txContentAddress_t *addresses[MAX_OUTPUTS];
 
 bagl_element_t tmp_element;
 
-#ifdef TARGET_NANOX
+#ifdef HAVE_UX_FLOW
 #include "ux.h"
+
 ux_state_t G_ux;
 bolos_ux_params_t G_ux_params;
-#else // TARGET_NANOX
+#else // HAVE_UX_FLOW
 ux_state_t ux;
-#endif // TARGET_NANOX
+#endif // HAVE_UX_FLOW
 
 // display stepped screens
 unsigned int ux_step;
 unsigned int ux_step_count;
 
-typedef struct internalStorage_t {
-    uint8_t dataAllowed;
-    uint8_t fidoTransport;
-    uint8_t initialized;
-    uint8_t chainid[32];
-} internalStorage_t;
 
 WIDE internalStorage_t const N_storage_real;
 #define N_storage (*(WIDE internalStorage_t *)PIC(&N_storage_real))
@@ -366,7 +372,7 @@ unsigned int ui_idle_blue_button(unsigned int button_mask,
 }
 #endif // #if defined(TARGET_BLUE)
 
-#if defined(TARGET_NANOS)
+#if defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
 
 const ux_menu_entry_t menu_main[];
 //const ux_menu_entry_t menu_settings_browser[];
@@ -590,7 +596,7 @@ unsigned int ui_settings_blue_button(unsigned int button_mask,
 #endif // #if defined(TARGET_BLUE)
 
 #if defined(TARGET_BLUE)
-// reuse addressSummary for each line content
+// reuse outstr.addressSummary for each line content
 const char *ui_details_title;
 const char *ui_details_content;
 typedef void (*callback_t)(void);
@@ -627,7 +633,7 @@ const bagl_element_t ui_details_blue[] = {
     /// TOP STATUS BAR
     {{BAGL_LABELINE, 0x01, 0, 45, 320, 30, 0, 0, BAGL_FILL, 0xFFFFFF, COLOR_APP,
       BAGL_FONT_OPEN_SANS_SEMIBOLD_10_13PX | BAGL_FONT_ALIGNMENT_CENTER, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -665,7 +671,7 @@ const bagl_element_t ui_details_blue[] = {
 
     {{BAGL_LABELINE, 0x10, 30, 136, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -674,7 +680,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x11, 30, 159, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -683,7 +689,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x12, 30, 182, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -692,7 +698,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x13, 30, 205, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -701,7 +707,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x14, 30, 228, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -710,7 +716,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x15, 30, 251, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -719,7 +725,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x16, 30, 274, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -728,7 +734,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x17, 30, 297, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -737,7 +743,7 @@ const bagl_element_t ui_details_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x18, 30, 320, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -747,7 +753,7 @@ const bagl_element_t ui_details_blue[] = {
     //"..." at the end if too much
     {{BAGL_LABELINE, 0x19, 30, 343, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -774,9 +780,9 @@ const bagl_element_t *ui_details_blue_prepro(const bagl_element_t *element) {
     } else if (element->component.userid > 0) {
         unsigned int length = strlen(ui_details_content);
         if (length >= (element->component.userid & 0xF) * MAX_CHAR_PER_LINE) {
-            os_memset(addressSummary, 0, MAX_CHAR_PER_LINE + 1);
+            os_memset(outstr.addressSummary, 0, MAX_CHAR_PER_LINE + 1);
             os_memmove(
-                addressSummary,
+                outstr.addressSummary,
                 ui_details_content +
                     (element->component.userid & 0xF) * MAX_CHAR_PER_LINE,
                 MIN(length -
@@ -954,7 +960,7 @@ const bagl_element_t ui_approval_blue[] = {
      0,
      NULL,
      NULL,
-     NULL}, // fullAmount
+     NULL}, // outstr.fullAmount
     {{BAGL_LABELINE, 0x20, 284, 196, 6, 16, 0, 0, BAGL_FILL, 0x999999,
       COLOR_BG_1, BAGL_FONT_SYMBOLS_0 | BAGL_FONT_ALIGNMENT_RIGHT, 0},
      BAGL_FONT_SYMBOLS_0_MINIRIGHT,
@@ -1012,7 +1018,7 @@ const bagl_element_t ui_approval_blue[] = {
      0,
      NULL,
      NULL,
-     NULL}, // fullAddress
+     NULL}, // outstr.fullAddress
     {{BAGL_LABELINE, 0x21, 284, 245, 6, 16, 0, 0, BAGL_FILL, 0x999999,
       COLOR_BG_1, BAGL_FONT_SYMBOLS_0 | BAGL_FONT_ALIGNMENT_RIGHT, 0},
      BAGL_FONT_SYMBOLS_0_MINIRIGHT,
@@ -1323,7 +1329,7 @@ const bagl_element_t ui_address_blue[] = {
 
     {{BAGL_LABELINE, 0x10, 30, 136, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -1332,7 +1338,7 @@ const bagl_element_t ui_address_blue[] = {
      NULL},
     {{BAGL_LABELINE, 0x11, 30, 159, 260, 30, 0, 0, BAGL_FILL, 0x000000,
       COLOR_BG_1, BAGL_FONT_OPEN_SANS_REGULAR_10_13PX, 0},
-     addressSummary,
+     outstr.addressSummary,
      0,
      0,
      0,
@@ -1368,12 +1374,12 @@ const bagl_element_t ui_address_blue[] = {
 
 unsigned int ui_address_blue_prepro(const bagl_element_t *element) {
     if (element->component.userid > 0) {
-        unsigned int length = strlen(fullAddress);
+        unsigned int length = strlen(outstr.fullAddress);
         if (length >= (element->component.userid & 0xF) * MAX_CHAR_PER_LINE) {
-            os_memset(addressSummary, 0, MAX_CHAR_PER_LINE + 1);
+            os_memset(outstr.addressSummary, 0, MAX_CHAR_PER_LINE + 1);
             os_memmove(
-                addressSummary,
-                fullAddress +
+                outstr.addressSummary,
+                outstr.fullAddress +
                     (element->component.userid & 0xF) * MAX_CHAR_PER_LINE,
                 MIN(length -
                         (element->component.userid & 0xF) * MAX_CHAR_PER_LINE,
@@ -1392,7 +1398,8 @@ unsigned int ui_address_blue_button(unsigned int button_mask,
 }
 #endif // #if defined(TARGET_BLUE)
 
-#if defined(TARGET_NANOS)
+#if defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
+
 
 #include "ui_address_nanos.h"
 
@@ -1419,19 +1426,20 @@ unsigned int ui_address_nanos_button(unsigned int button_mask,
                                      unsigned int button_mask_counter);
 #endif // #if defined(TARGET_NANOS)
 
-#if defined(TARGET_NANOS)
+#if defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
+
 const char *const ui_approval_details[][2] = {
-    {"Output 1 Amount", (const char*)fullAmount}, {"Output 1 Address", (const char*)addressSummary},
-    {"Output 2 Amount", (const char*)fullAmount}, {"Output 2 Address", (const char*)addressSummary},
-    {"Output 3 Amount", (const char*)fullAmount}, {"Output 3 Address", (const char*)addressSummary},
-    {"Output 4 Amount", (const char*)fullAmount}, {"Output 4 Address", (const char*)addressSummary},
-    {"Output 5 Amount", (const char*)fullAmount}, {"Output 5 Address", (const char*)addressSummary},
-    {"Output 6 Amount", (const char*)fullAmount}, {"Output 6 Address", (const char*)addressSummary},
-    {"Output 7 Amount", (const char*)fullAmount}, {"Output 7 Address", (const char*)addressSummary},
-    {"Output 8 Amount", (const char*)fullAmount}, {"Output 8 Address", (const char*)addressSummary},
-    {"Output 9 Amount", (const char*)fullAmount}, {"Output 9 Address", (const char*)addressSummary},
-    {"Output 10 Amount", (const char*)fullAmount}, {"Output 10 Address", (const char*)addressSummary},
     {"Fees", (const char*)maxFee},
+    {"Output 1 Amount", (const char*)outstr.fullAmount}, {"Output 1 Address", (const char*)outstr.addressSummary},
+    {"Output 2 Amount", (const char*)outstr.fullAmount}, {"Output 2 Address", (const char*)outstr.addressSummary},
+    {"Output 3 Amount", (const char*)outstr.fullAmount}, {"Output 3 Address", (const char*)outstr.addressSummary},
+    {"Output 4 Amount", (const char*)outstr.fullAmount}, {"Output 4 Address", (const char*)outstr.addressSummary},
+    {"Output 5 Amount", (const char*)outstr.fullAmount}, {"Output 5 Address", (const char*)outstr.addressSummary},
+    {"Output 6 Amount", (const char*)outstr.fullAmount}, {"Output 6 Address", (const char*)outstr.addressSummary},
+    {"Output 7 Amount", (const char*)outstr.fullAmount}, {"Output 7 Address", (const char*)outstr.addressSummary},
+    {"Output 8 Amount", (const char*)outstr.fullAmount}, {"Output 8 Address", (const char*)outstr.addressSummary},
+    {"Output 9 Amount", (const char*)outstr.fullAmount}, {"Output 9 Address", (const char*)outstr.addressSummary},
+    {"Output 10 Amount", (const char*)outstr.fullAmount}, {"Output 10 Address", (const char*)outstr.addressSummary},
 };
 
 const bagl_element_t ui_approval_nanos[] = {
@@ -1471,7 +1479,7 @@ const bagl_element_t ui_approval_nanos[] = {
     // 0, NULL, NULL, NULL },
     {{BAGL_LABELINE, 0x01, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000,
       BAGL_FONT_OPEN_SANS_EXTRABOLD_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-     "Confirm",
+     confirm_string,
      0,
      0,
      0,
@@ -1499,7 +1507,7 @@ const bagl_element_t ui_approval_nanos[] = {
      NULL},
     {{BAGL_LABELINE, 0x12, 23, 26, 82, 12, 0x80 | 10, 0, 0, 0xFFFFFF, 0x000000,
       BAGL_FONT_OPEN_SANS_EXTRABOLD_11px | BAGL_FONT_ALIGNMENT_CENTER, 26},
-     NULL, //(char *)fullAmount,
+     NULL, //(char *)outstr.fullAmount,
      0,
      0,
      0,
@@ -1512,6 +1520,7 @@ const bagl_element_t ui_approval_nanos[] = {
 unsigned int ui_approval_prepro(const bagl_element_t *element) {
     unsigned int display = 1;
     uint8_t offset = 0;
+    int havemoore = 0;
     if (element->component.userid > 0) {
         // display the meta element when at least bigger
         display = (ux_step == element->component.userid - 1) ||
@@ -1526,28 +1535,68 @@ unsigned int ui_approval_prepro(const bagl_element_t *element) {
                 os_memmove(&tmp_element, element, sizeof(bagl_element_t));
                 display = ux_step - 1;
                 switch (display) {
-                case 0: // amount
+                // no break is intentional
+                case 0: // fees
+                    if ( strlen(maxFee) != 0 )
+                    {
+                        display = 0;
+                        goto display_detail;
+                    }
+		    else
+		    {
+                        display = 1;
+			++ux_step;
+		    }
+
+                case 1: // amount
                     offset = 0;
                     display_amount_offset:
                     if ( addresses[offset] )
                     {
-                        fct_print_amount(addresses[offset]->value,(int8_t*)fullAmount,sizeof(fullAmount));
+                        if ( addresses_type[offset] == PUBLIC_OFFSET_FCT_FAT )
+                        {
+                            //fct_print_amount(addresses[offset]->amt.value,(int8_t*)outstr.fullAmount,sizeof(outstr.fullAmount));
+                            int size = addresses[offset]->amt.fat.size<sizeof(outstr.fullAmount)?addresses[offset]->amt.fat.size:(sizeof(outstr.fullAmount)-1);
+                            strncpy((int8_t*)outstr.fullAmount, addresses[offset]->amt.fat.entry, size);
+                        }
+                        else
+                        {
+			    if ( addresses[offset]->amt.value == 0 )
+			    {
+                                strcpy(outstr.fullAmount, "FCT 0");
+                                //goto display_address_offset;
+                            }
+			    else
+			    {
+                                fct_print_amount(addresses[offset]->amt.value,(int8_t*)outstr.fullAmount,sizeof(outstr.fullAmount));
+			    }
+                        }
 
                         goto display_detail;
                     }
-                case 1: // address
+                case 2: // address
                     offset = 0;
                     display_address_offset:
                     if ( addresses[offset] )
                     {
-			os_memset((void*)fullAddress, 0, sizeof(fullAddress));
-                        getFctAddressStringFromRCDHash((uint8_t*)addresses[offset]->rcdhash,(uint8_t*)fullAddress, addresses_type[offset]);
+			os_memset((void*)outstr.fullAddress, 0, sizeof(outstr.fullAddress));
+                        if ( addresses_type[offset] == PUBLIC_OFFSET_FCT_FAT)
+                        {
+                            strncpy(outstr.fullAddress,addresses[offset]->addr.fctaddr,52);
+                        }
+                        else
+                        {
+                            getFctAddressStringFromRCDHash((uint8_t*)addresses[offset]->addr.rcdhash,(uint8_t*)outstr.fullAddress, addresses_type[offset]);
+                        }
 
-			os_memset((void*)addressSummary, 0, sizeof(addressSummary));
-                        os_memmove((void *)addressSummary, (void*)fullAddress, 10);
-                        os_memmove((void *)(addressSummary + 10), "..", 2);
-                        os_memmove((void *)(addressSummary + 12),
-                                   (void*)(fullAddress + strlen(fullAddress) - 4), 4);
+			os_memset((void*)outstr.addressSummary, 0, sizeof(outstr.addressSummary));
+                        os_memmove((void *)outstr.addressSummary, (void*)outstr.fullAddress, 7);
+                        os_memmove((void *)(outstr.addressSummary + 7), "..", 2);
+                        os_memmove((void *)(outstr.addressSummary + 9),
+                                   (void*)(outstr.fullAddress + strlen(outstr.fullAddress) - 4), 4);
+			if ( strcmp(outstr.addressSummary, "FA1zT4a..F2MC") == 0 ) {
+                            os_memmove((void *)(outstr.addressSummary), "Burn Address", strlen("Burn Address"));
+			}
                         goto display_detail;
                     }
                 display_detail:
@@ -1555,93 +1604,85 @@ unsigned int ui_approval_prepro(const bagl_element_t *element) {
                         ui_approval_details[display]
                                            [(element->component.userid) >> 4];
                     break;
-                case 2:
-                    offset = 1;
-                    if ( addresses[offset] )
-                    {
-                        display = 2;
-                        goto display_amount_offset;
-                    }
-                // no break is intentional
                 case 3:
                     offset = 1;
                     if ( addresses[offset] )
                     {
                         display = 3;
-                        goto display_address_offset;
-                    }
-                case 4:
-                    offset = 2;
-                    if ( addresses[offset] )
-                    {
-                        display = 4;
                         goto display_amount_offset;
                     }
                 // no break is intentional
+                case 4:
+                    offset = 1;
+                    if ( addresses[offset] )
+                    {
+                        display = 4;
+                        goto display_address_offset;
+                    }
                 case 5:
                     offset = 2;
                     if ( addresses[offset] )
                     {
                         display = 5;
-                        goto display_address_offset;
-                    }
-                    // no break is intentional
-                case 6:
-                    offset = 3;
-                    if ( addresses[offset] )
-                    {
-                        display = 6;
                         goto display_amount_offset;
                     }
                 // no break is intentional
+                case 6:
+                    offset = 2;
+                    if ( addresses[offset] )
+                    {
+                        display = 6;
+                        goto display_address_offset;
+                    }
+                    // no break is intentional
                 case 7:
                     offset = 3;
                     if ( addresses[offset] )
                     {
                         display = 7;
+                        goto display_amount_offset;
+                    }
+                // no break is intentional
+                case 8:
+                    offset = 3;
+                    if ( addresses[offset] )
+                    {
+                        display = 8;
                         goto display_address_offset;
                     }
 
                 // no break is intentional
-                case 8:
-                    offset = 4;
-                    if ( addresses[offset] )
-                    {
-                        display = 8;
-                        goto display_amount_offset;
-                    }
-                    // no break is intentional
                 case 9:
                     offset = 4;
                     if ( addresses[offset] )
                     {
                         display = 9;
+                        goto display_amount_offset;
+                    }
+                    // no break is intentional
+                case 10:
+                    offset = 4;
+                    if ( addresses[offset] )
+                    {
+                        display = 10;
                         goto display_address_offset;
                     }
 
                 // no break is intentional
-                case 10:
-                    offset = 5;
-                    if ( addresses[offset] )
-                    {
-                        display = 10;
-                        goto display_amount_offset;
-                    }
-                    // no break is intentional
                 case 11:
                     offset = 5;
                     if ( addresses[offset] )
                     {
                         display = 11;
-                        goto display_address_offset;
+                        goto display_amount_offset;
                     }
                     // no break is intentional
                 case 12:
-                    offset = 6;
+                    offset = 5;
                     if ( addresses[offset] )
                     {
                         display = 12;
-                        goto display_amount_offset;
+                        goto display_address_offset;
                     }
                     // no break is intentional
                 case 13:
@@ -1649,32 +1690,32 @@ unsigned int ui_approval_prepro(const bagl_element_t *element) {
                     if ( addresses[offset] )
                     {
                         display = 13;
-                        goto display_address_offset;
+                        goto display_amount_offset;
                     }
-
                     // no break is intentional
                 case 14:
-                    offset = 7;
+                    offset = 6;
                     if ( addresses[offset] )
                     {
                         display = 14;
-                        goto display_amount_offset;
+                        goto display_address_offset;
                     }
+
                     // no break is intentional
                 case 15:
                     offset = 7;
                     if ( addresses[offset] )
                     {
                         display = 15;
-                        goto display_address_offset;
+                        goto display_amount_offset;
                     }
                     // no break is intentional
                 case 16:
-                    offset = 8;
+                    offset = 7;
                     if ( addresses[offset] )
                     {
                         display = 16;
-                        goto display_amount_offset;
+                        goto display_address_offset;
                     }
                     // no break is intentional
                 case 17:
@@ -1682,15 +1723,15 @@ unsigned int ui_approval_prepro(const bagl_element_t *element) {
                     if ( addresses[offset] )
                     {
                         display = 17;
-                        goto display_address_offset;
+                        goto display_amount_offset;
                     }
                     // no break is intentional
                 case 18:
-                    offset = 9;
+                    offset = 8;
                     if ( addresses[offset] )
                     {
                         display = 18;
-                        goto display_amount_offset;
+                        goto display_address_offset;
                     }
                     // no break is intentional
                 case 19:
@@ -1698,17 +1739,30 @@ unsigned int ui_approval_prepro(const bagl_element_t *element) {
                     if ( addresses[offset] )
                     {
                         display = 19;
+                        goto display_amount_offset;
+                    }
+                    // no break is intentional
+                case 20:
+                    offset = 9;
+                    if ( addresses[offset] )
+                    {
+                        display = 20;
                         goto display_address_offset;
                     }
                 // no break is intentional
-                case 20: // fees
-                    display = 20;
+		/*
+                case 0: // fees
+                    if ( strlen(maxFee) != 0 )
+                    {
+                        display = 0;
+                    }
                     goto display_detail;
+		    */
                 }
 
                 UX_CALLBACK_SET_INTERVAL(MAX(
-                    2000,
-                    1000 + bagl_label_roundtrip_duration_ms(&tmp_element, 7)));
+                    1000,
+                    bagl_label_roundtrip_duration_ms(&tmp_element, 7)));
                 return &tmp_element;
             }
         }
@@ -1763,7 +1817,7 @@ const bagl_element_t ui_approval_nanos_ec[] = {
      NULL},
     {{BAGL_LABELINE, 0x01, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000,
       BAGL_FONT_OPEN_SANS_EXTRABOLD_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-     (char*)addressSummary,
+     (char*)outstr.addressSummary,
      0,
      0,
      0,
@@ -1819,7 +1873,7 @@ const bagl_element_t ui_approval_nanos_id[] = {
      NULL},
     {{BAGL_LABELINE, 0x01, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000,
       BAGL_FONT_OPEN_SANS_EXTRABOLD_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-     (char*)addressSummary,
+     (char*)outstr.addressSummary,
      0,
      0,
      0,
@@ -1827,6 +1881,7 @@ const bagl_element_t ui_approval_nanos_id[] = {
      NULL,
      NULL},
 };
+
 
 
 const bagl_element_t ui_approval_nanos_store_chainid[] = {
@@ -1875,7 +1930,7 @@ const bagl_element_t ui_approval_nanos_store_chainid[] = {
      NULL},
     {{BAGL_LABELINE, 0x01, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000,
       BAGL_FONT_OPEN_SANS_EXTRABOLD_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-     (char*)addressSummary,
+     (char*)outstr.addressSummary,
      0,
      0,
      0,
@@ -1998,7 +2053,7 @@ unsigned int ui_approval_nanos_button(unsigned int button_mask,
 
 #endif // #if defined(TARGET_NANOS)
 
-#if defined(TARGET_NANOX)
+#if defined(HAVE_UX_FLOW)
 
 const char* settings_submenu_getter(unsigned int idx);
 void settings_submenu_selector(unsigned int idx);
@@ -2125,8 +2180,8 @@ UX_STEP_NOCB(
     ux_variable_display, 
     bnnn_paging,
     {
-      .title = fullAmount,
-      .text = fullAddress
+      .title = outstr.fullAmount,
+      .text = outstr.fullAddress
     });
 UX_STEP_INIT(
     ux_init_lower_border,
@@ -2159,7 +2214,7 @@ UX_STEP_VALID(
       &C_icon_crossmark,
       "Reject",
     });
-// confirm_full: confirm transaction / Amount: fullAmount / Address: fullAddress / Fees: feesAmount
+// confirm_full: confirm transaction / Amount: outstr.fullAmount / Address: outstr.fullAddress / Fees: feesAmount
 UX_FLOW(ux_confirm_full_flow,
   &ux_confirm_full_flow_1_step,
   &ux_init_upper_border,
@@ -2184,15 +2239,15 @@ void set_state_data() {
     {
         case STATE_AMOUNT:
             // set amount
-            strcpy(fullAmount, "Amount");
-            fct_print_amount(addresses[current_output]->value,(int8_t*)fullAddress,sizeof(fullAddress));
+            strcpy(outstr.fullAmount, "Amount");
+            fct_print_amount(addresses[current_output]->amt.value,(int8_t*)outstr.fullAddress,sizeof(outstr.fullAddress));
             break;
 
         case STATE_ADDRESS:
             // set destination address
-            strcpy(fullAmount, "Destination");
-            os_memset((void*)fullAddress, 0, sizeof(fullAddress));
-            getFctAddressStringFromRCDHash((uint8_t*)addresses[current_output]->rcdhash,(uint8_t*)fullAddress, addresses_type[current_output]);
+            strcpy(outstr.fullAmount, "Destination");
+            os_memset((void*)outstr.fullAddress, 0, sizeof(outstr.fullAddress));
+            getFctAddressStringFromRCDHash((uint8_t*)addresses[current_output]->addr.rcdhash,(uint8_t*)outstr.fullAddress, addresses_type[current_output]);
             break;
     
         default:
@@ -2274,7 +2329,7 @@ void ui_idle(void) {
     skipWarning = false;
 #if defined(TARGET_BLUE)
     UX_DISPLAY(ui_idle_blue, NULL);
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     if ( batchModeEnabled )
     {
       UX_MENU_DISPLAY(0, menu_batchmode, NULL);
@@ -2283,7 +2338,7 @@ void ui_idle(void) {
     {
     UX_MENU_DISPLAY(0, menu_main, NULL);
     }
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
     // reserve a display stack slot if none yet
     if(G_ux.stack_count == 0) {
         ux_stack_push();
@@ -2330,7 +2385,7 @@ unsigned int io_seproxyhal_touch_address_cancel(const bagl_element_t *e) {
     return 0; // do not redraw the widget
 }
 
-#if defined(TARGET_NANOS)
+#if defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
 unsigned int ui_address_nanos_button(unsigned int button_mask,
                                      unsigned int button_mask_counter) {
     switch (button_mask) {
@@ -2361,10 +2416,18 @@ unsigned int io_seproxyhal_touch_tx_ok(const bagl_element_t *e)
     cx_ecfp_init_private_key(CX_CURVE_Ed25519, privateKeyData, 32, &privateKey);
     os_memset(privateKeyData, 0, sizeof(privateKeyData));
 
+    uint8_t *rawTx = tmpCtx.transactionContext.rawTx;
+    uint32_t rawTxLength = tmpCtx.transactionContext.rawTxLength;
+
+    if ( addresses_type[0] == PUBLIC_OFFSET_FCT_FAT )
+    {
+        rawTx = tmpCtx.transactionContext.hashCtx.sha512.hash;
+        rawTxLength = sizeof(tmpCtx.transactionContext.hashCtx.sha512.hash);
+    }
     //store signature in 35..97
     signatureLength = cx_eddsa_sign(&privateKey, CX_LAST, CX_SHA512,
-                            tmpCtx.transactionContext.rawTx,
-                            tmpCtx.transactionContext.rawTxLength,
+                            rawTx,
+                            rawTxLength,
 			    NULL, 0,
                             &G_io_apdu_buffer[35], sizeof(G_io_apdu_buffer)-35, NULL);
 
@@ -2383,6 +2446,15 @@ unsigned int io_seproxyhal_touch_tx_ok(const bagl_element_t *e)
     getCompressedPublicKeyWithRCD(&tmpCtx.publicKeyContext.publicKey,
                                G_io_apdu_buffer, 33);
     signatureLength+=33;
+
+
+    if ( addresses_type[0] == PUBLIC_OFFSET_FCT_FAT )
+    {
+        //we're siging the sha512 hash since this is a FAT transaction, so return it.
+        os_memmove(&G_io_apdu_buffer[signatureLength], rawTx, rawTxLength);
+        signatureLength += rawTxLength;
+    }
+
 
     //append success 
     G_io_apdu_buffer[signatureLength++] = 0x90;
@@ -2556,14 +2628,14 @@ void ui_approval_transaction_blue_init(void) {
     ui_approval_blue_cancel =
         (bagl_element_callback_t)io_seproxyhal_touch_tx_cancel;
     G_ui_approval_blue_state = APPROVAL_TRANSACTION;
-    ui_approval_blue_values[0] = fullAmount;
-    ui_approval_blue_values[1] = fullAddress;
+    ui_approval_blue_values[0] = outstr.fullAmount;
+    ui_approval_blue_values[1] = outstr.fullAddress;
     ui_approval_blue_values[2] = maxFee;
     ui_approval_blue_init();
 }
 
 
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
 unsigned int ui_approval_nanos_button(unsigned int button_mask,
                                       unsigned int button_mask_counter)
 {
@@ -2800,17 +2872,19 @@ void handleGetPublicKey(uint8_t p1, uint8_t p2, uint8_t *dataBuffer,
         // prepare for a UI based reply
         skipWarning = false;
 #if defined(TARGET_BLUE)
-        snprintf((char*)fullAddress, sizeof(fullAddress), "%.*s", 
+        snprintf((char*)outstr.fullAddress, sizeof(outstr.fullAddress), "%.*s", 
                  (keytype == PUBLIC_OFFSET_ID) ? 55 : 52,
                  tmpCtx.publicKeyContext.address);
         UX_DISPLAY(ui_address_blue, ui_address_blue_prepro);
-#elif defined(TARGET_NANOS)
-        snprintf((char*)fullAddress, sizeof(fullAddress), " %.*s ", 
+#elif defined(TARGET_NANOS) && !defined (HAVE_UX_FLOW)
+        snprintf((char*)outstr.fullAddress, sizeof(outstr.fullAddress), " %.*s ", 
                  (keytype == PUBLIC_OFFSET_ID) ? 55 : 52,
                  tmpCtx.publicKeyContext.address);
         ux_step = 0;
         ux_step_count = 2;
         UX_DISPLAY(ui_address_nanos, ui_address_prepro);
+#else defined(HAVE_UX_FLOW)
+#pragma message("FIXME: handleGetPublicKey")
 #endif // #if TARGET_ID
 
         *flags |= IO_ASYNCH_REPLY;
@@ -2835,7 +2909,7 @@ void handleGetAppConfiguration(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     G_io_apdu_buffer[0] = (chainidset) ? 0x01 : 0x00;
     G_io_apdu_buffer[1] = LEDGER_MAJOR_VERSION;
     G_io_apdu_buffer[2] = LEDGER_MINOR_VERSION;
-    G_io_apdu_buffer[3] = LEDGER_MAJOR_VERSION;
+    G_io_apdu_buffer[3] = LEDGER_PATCH_VERSION;
     *tx = 4;
     THROW(0x9000);
 }
@@ -2892,7 +2966,7 @@ void handleSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
         tmpCtx.transactionContext.headervalid = HEADER_TYPE_TXSIGN;
     break;
 
-    case P1_MORE: //LEDGER-REVIEW: this case should check if a call with P1_FIRST has been executed previously, and throw if not
+    case P1_MORE: 
 
         //DB: Corrected check
         if ( tmpCtx.transactionContext.headervalid != HEADER_TYPE_TXSIGN )
@@ -2961,8 +3035,8 @@ void handleSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     }
 
     // "confirm", amount, address, ..., amount[n], address[n], fee
-    os_memset((void*)addressSummary, 0, sizeof(addressSummary));
-    os_memset((void*)fullAmount, 0, sizeof(fullAmount));
+    os_memset((void*)outstr.addressSummary, 0, sizeof(outstr.addressSummary));
+    os_memset((void*)outstr.fullAmount, 0, sizeof(outstr.fullAmount));
     for ( int i = 0; i < MAX_OUTPUTS; ++i )
     {
         addresses[i] = NULL;
@@ -2986,16 +3060,18 @@ void handleSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     {
 
         addresses_type[output_ct] = PUBLIC_OFFSET_EC;
-        addresses[output_ct++] = &txContent.ecpurchase[i];
+        addresses[output_ct++] = &txContent.t.ecpurchase[i];
         ux_step_count += 2;
     }
 
+    
+    strcpy(confirm_string,"Confirm");
 #if defined(TARGET_BLUE)
     ux_step_count = 0;
     ui_approval_transaction_blue_init();
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     UX_DISPLAY(ui_approval_nanos, ui_approval_prepro);
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
     current_output = 0;
     num_outputs = output_ct;
     current_state = STATE_BORDER;
@@ -3021,7 +3097,7 @@ void handleStoreChainId(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
         THROW(BTCHIP_SW_INCORRECT_DATA);
     }
     os_memmove(&tmpCtx.chainidContext.chainId,workBuffer,32);
-    snprintf(addressSummary,sizeof(addressSummary),"Store Chain ID?");
+    snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Store Chain ID?");
 
     ux_step_count = 0;
     ux_step = 0;
@@ -3029,10 +3105,11 @@ void handleStoreChainId(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
 #if defined(TARGET_BLUE)
     ux_step_count = 0;
     ui_approval_transaction_blue_init();
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     UX_DISPLAY(ui_approval_nanos_store_chainid, ui_approval_prepro_store_chainid);
     *flags |= IO_ASYNCH_REPLY;
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
+#pragma message("FIXME: handleStoreChainId")
     THROW(ERROR_TARGET_NOT_SUPPORTED);
 #endif
 
@@ -3115,7 +3192,7 @@ void handleSignRawMessageWithId(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     //reset header check now that we have valid data
     tmpCtx.transactionContext.headervalid = 0;
 
-    snprintf(addressSummary,sizeof(addressSummary),"Sign Data w/ID");
+    snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Sign Data w/ID");
 
     ux_step_count = 0;
     ux_step = 0;
@@ -3123,7 +3200,7 @@ void handleSignRawMessageWithId(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
 #if defined(TARGET_BLUE)
     ux_step_count = 0;
     ui_approval_transaction_blue_init();
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     if ( batchModeEnabled )
     {
         io_seproxyhal_touch_id_tx_ok(NULL);
@@ -3134,7 +3211,8 @@ void handleSignRawMessageWithId(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
         // UX_DISPLAY(ui_approval_nanos_id, ui_approval_prepro_id);
         *flags |= IO_ASYNCH_REPLY;
     }
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
+#pragma message("FIXME: handleSignRawMessageWithId")
     THROW(ERROR_TARGET_NOT_SUPPORTED);
 #endif
 
@@ -3239,12 +3317,12 @@ void handleSignMessageHash(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
                 sizeof(tmpCtx.messageSigningContext.hashCtx.sha256.hash));
         }
 
-        tmpCtx.transactionContext.headervalid = HEADER_TYPE_MSGSIGN;
+        tmpCtx.messageSigningContext.headervalid = HEADER_TYPE_MSGSIGN;
         break;
     }
     case P1_MORE:
 
-        if ( tmpCtx.transactionContext.headervalid != HEADER_TYPE_MSGSIGN )
+        if ( tmpCtx.messageSigningContext.headervalid != HEADER_TYPE_MSGSIGN )
         {
             THROW(BTCHIP_SW_INCORRECT_P1_P2);
         }
@@ -3303,13 +3381,13 @@ void handleSignMessageHash(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     switch (msg.bip32Path[1])
     {
         case FACTOM_ID_TYPE:
-            snprintf(addressSummary,sizeof(addressSummary),"Sign Data w/ID");
+            snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Sign Data w/ID");
             break;
         case FCT_TYPE:
-            snprintf(addressSummary,sizeof(addressSummary),"Sign w/FCT Addr");
+            snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Sign w/FCT Addr");
             break;
         case EC_TYPE:
-            snprintf(addressSummary,sizeof(addressSummary),"Sign w/EC Addr");
+            snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Sign w/EC Addr");
 	    break;
         default:
             THROW(0x6B00);
@@ -3321,7 +3399,7 @@ void handleSignMessageHash(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
 #if defined(TARGET_BLUE)
     ux_step_count = 0;
     ui_approval_transaction_blue_init();
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     if ( msg.bip32Path[1] == FACTOM_ID_TYPE && batchModeEnabled )
     {
        io_seproxyhal_touch_id_tx_ok(NULL);
@@ -3331,7 +3409,8 @@ void handleSignMessageHash(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
         UX_DISPLAY(ui_approval_nanos_id, ui_approval_prepro_id);
         *flags |= IO_ASYNCH_REPLY;
     }
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
+#pragma message("FIXME: handleSignMessageHash")
     THROW(ERROR_TARGET_NOT_SUPPORTED);
 #endif
 
@@ -3339,6 +3418,194 @@ void handleSignMessageHash(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
 }
 
 #endif
+
+
+void handleSignFatTx(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
+                  uint16_t dataLength,
+                  volatile unsigned int *flags,
+                  volatile unsigned int *tx)
+{
+    UNUSED(tx);
+
+    uint8_t p1last = p1&0x0F;
+    uint8_t p1state = p1&0xF0;
+
+    switch (p1state)
+    {
+    case P1_FIRST:
+    {
+        os_memset(&tmpCtx.transactionContext,0,sizeof(tmpCtx.transactionContext));
+        os_memset(&txContent,0,sizeof(txContent));
+
+
+        tmpCtx.transactionContext.pathLength = workBuffer[0];
+        if ((tmpCtx.transactionContext.pathLength < 0x01) ||
+            (tmpCtx.transactionContext.pathLength > MAX_BIP32_PATH))
+        {
+            THROW(0x6a80);
+        }
+        workBuffer++;
+        dataLength--;
+
+        //now extract the pathing information
+        for (int i = 0; i < tmpCtx.transactionContext.pathLength; i++)
+        {
+            tmpCtx.transactionContext.bip32Path[i] =
+                (workBuffer[0] << 24) |
+                (workBuffer[1] << 16) |
+                (workBuffer[2] << 8)  |
+                (workBuffer[3]);
+            workBuffer += 4;
+            dataLength -= 4;
+        }
+
+        //tmpCtx.messageSigningContext.hashtype = HASH_TYPE_SHA512;//p2&0x01;
+        //workBuffer++;
+        //dataLength--;
+
+        cx_sha512_init(&tmpCtx.transactionContext.hashCtx.sha512.context);
+        
+        //hash the first part of the data.
+        cx_hash(&tmpCtx.transactionContext.hashCtx.sha512.context, (p1last==1)?CX_LAST:0,
+                workBuffer, dataLength,
+                tmpCtx.transactionContext.hashCtx.sha512.hash,
+                sizeof(tmpCtx.transactionContext.hashCtx.sha512.hash));
+  
+        tmpCtx.transactionContext.rawTxLength = dataLength;
+        
+        if ( tmpCtx.transactionContext.rawTxLength > MAX_RAW_TX )
+        {
+           os_memset(&tmpCtx.transactionContext, 0, sizeof(tmpCtx.transactionContext));
+           //Transaction too large for device
+           THROW(0x6A80);
+        } 
+
+        os_memmove(tmpCtx.transactionContext.rawTx, workBuffer, dataLength);
+        
+        tmpCtx.transactionContext.headervalid = HEADER_TYPE_FATSIGN;
+        break;
+    }
+    case P1_MORE:
+
+        if ( tmpCtx.transactionContext.headervalid != HEADER_TYPE_FATSIGN )
+        {
+            THROW(BTCHIP_SW_INCORRECT_P1_P2);
+        }
+
+
+            //hash the first part of the data.
+            cx_hash(&tmpCtx.transactionContext.hashCtx.sha512.context, (p1last==1)?CX_LAST:0,
+                workBuffer, dataLength,
+                tmpCtx.transactionContext.hashCtx.sha512.hash,
+                sizeof(tmpCtx.transactionContext.hashCtx.sha512.hash));
+            
+        
+        //buffer length check
+        if ( tmpCtx.transactionContext.rawTxLength + dataLength  > MAX_RAW_TX )
+        {
+           os_memset(&tmpCtx.transactionContext, 0, sizeof(tmpCtx.transactionContext));
+           //Transaction too large for device
+           THROW(0x6A80);
+        } 
+
+        os_memmove(&tmpCtx.transactionContext.rawTx[tmpCtx.transactionContext.rawTxLength],
+                   workBuffer, dataLength);
+        tmpCtx.transactionContext.rawTxLength += dataLength;
+
+        
+        break;
+    default:
+        THROW(0x6B00);
+    };
+
+    if ( p1last == 0 )
+    {
+        THROW(0x9000);
+    }
+
+    
+    int ret = 0;
+
+    ret = parseFatTx(p2,tmpCtx.transactionContext.rawTx,
+                     tmpCtx.transactionContext.rawTxLength,
+                    &txContent);
+
+
+    if ( ret != 0)
+    {
+        //THROW(0x6B12);
+        THROW(0x6E00|(0xFF&ret));
+    }
+
+
+    if ( txContent.header.inputcount < 1 )
+    {
+        THROW(0x6B02);
+    }
+
+
+    if ( txContent.header.outputcount > MAX_OUTPUTS )
+    {
+        
+        THROW(0x6B03);
+    }
+
+    // "confirm", amount, address, ..., amount[n], address[n], fee
+    os_memset((void*)outstr.addressSummary, 0, sizeof(outstr.addressSummary));
+    os_memset((void*)outstr.fullAmount, 0, sizeof(outstr.fullAmount));
+    for ( int i = 0; i < MAX_OUTPUTS; ++i )
+    {
+        addresses[i] = NULL;
+    }
+
+
+    ux_step_count = 2;
+    ux_step = 1;
+
+    maxFee[0] = 0; //no explicit fees for FAT transaction. It is a separate EC transaction cost signed for separately
+
+    //should loop through and look at input that is relative to this transaction for signing
+    //to confirm the amount to be signed for from this account.
+
+
+    int output_ct = 0;
+    for ( int i = 0; i < txContent.header.outputcount;++i )
+    {
+        addresses_type[output_ct] = PUBLIC_OFFSET_FCT_FAT;
+        addresses[output_ct++] = &txContent.outputs[i];
+        ux_step_count += 2;
+    }
+
+/*
+    for ( int i = 0; i < txContent.header.ecpurchasecount;++i )
+    {
+
+        addresses_type[output_ct] = PUBLIC_OFFSET_EC;
+        addresses[output_ct++] = &txContent.ecpurchase[i];
+        ux_step_count += 2;
+    }
+    */
+
+    strcpy(confirm_string,"Confirm FAT");
+
+#if defined(TARGET_BLUE)
+    ux_step_count = 0;
+    ui_approval_transaction_blue_init();
+
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
+    UX_DISPLAY(ui_approval_nanos, ui_approval_prepro);
+#elif defined(HAVE_UX_FLOW)
+    current_output = 0;
+    num_outputs = output_ct;
+    current_state = STATE_BORDER;
+    ux_flow_init(0, ux_confirm_full_flow, NULL);
+#endif // #if TARGET
+
+    *flags |= IO_ASYNCH_REPLY;
+
+    *tx = 0;
+}
+
 
 void handleCommitSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
                   uint16_t dataLength,
@@ -3436,7 +3703,7 @@ void handleCommitSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
             THROW(ret);
         }
 
-	snprintf(addressSummary,sizeof(addressSummary),"Sign Chain?");
+	snprintf(outstr.addressSummary,sizeof(outstr.addressSummary),"Sign Chain?");
         //os_memmove(pubkey.W,txCcContent.ecpubkey,pubkey.W_len);
 
     }
@@ -3452,7 +3719,7 @@ void handleCommitSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
         }
 
         //os_memmove(pubkey.W,txEcContent.ecpubkey,pubkey.W_len);
-	snprintf((char*)addressSummary,sizeof(addressSummary),"Sign Entry?");
+	snprintf((char*)outstr.addressSummary,sizeof(outstr.addressSummary),"Sign Entry?");
 
     }
 
@@ -3463,10 +3730,10 @@ void handleCommitSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
     os_memset((void *) addr, 0, sizeof(addr));
     getFctAddressStringFromKey(&pubkey,addr,PUBLIC_OFFSET_EC);
 
-    os_memset((void *) addressSummary, 0, sizeof(addressSummary));
-    os_memmove((void *) addressSummary, addr, 10);
-    os_memmove((void *)(addressSummary + 10), "..", 2);
-    os_memmove((void *)(addressSummary + 12),
+    os_memset((void *) outstr.addressSummary, 0, sizeof(outstr.addressSummary));
+    os_memmove((void *) outstr.addressSummary, addr, 7);
+    os_memmove((void *)(outstr.addressSummary + 7), "..", 2);
+    os_memmove((void *)(outstr.addressSummary + 9),
                         addr + addressLength - 4, 4);
     ux_step_count = 2; 
 #else
@@ -3478,9 +3745,10 @@ void handleCommitSign(uint8_t p1, uint8_t p2, uint8_t *workBuffer,
 #if defined(TARGET_BLUE)
     ux_step_count = 0;
     ui_approval_transaction_blue_init();
-#elif defined(TARGET_NANOS)
+#elif defined(TARGET_NANOS) && !defined(HAVE_UX_FLOW)
     UX_DISPLAY(ui_approval_nanos_id, ui_approval_prepro_id);
-#elif defined(TARGET_NANOX)
+#elif defined(HAVE_UX_FLOW)
+#pragma message("FIXME: handleCommitSign")
     THROW(ERROR_TARGET_NOT_SUPPORTED);
 #endif // #if TARGET
 
@@ -3543,7 +3811,14 @@ void handleApdu(volatile unsigned int *flags, volatile unsigned int *tx) {
                            G_io_apdu_buffer[OFFSET_LC], flags, tx);
                 break;
 #endif
-
+                
+                
+            case INS_SIGN_FAT:
+                handleSignFatTx(G_io_apdu_buffer[OFFSET_P1],
+                           G_io_apdu_buffer[OFFSET_P2],
+                           G_io_apdu_buffer + OFFSET_CDATA,
+                           G_io_apdu_buffer[OFFSET_LC], flags, tx);
+                break;
 #endif // TARGET_NANOX
             case INS_GET_APP_CONFIGURATION:
                 handleGetAppConfiguration(
@@ -3742,6 +4017,11 @@ __attribute__((section(".boot"))) int main(void) {
             TRY {
                 io_seproxyhal_init();
 
+//#ifdef TARGET_NANOX
+//                // grab the current plane mode setting
+//                G_io_app.plane_mode = os_setting_get(OS_SETTING_PLANEMODE, NULL, 0);
+//#endif // TARGET_NANOX
+                
                 if (N_storage.initialized != 0x01) {
                     internalStorage_t storage;
                     //storage.fidoTransport = 0x00;

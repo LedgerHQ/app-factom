@@ -25,7 +25,7 @@ APPNAME = Factom
 APP_LOAD_PARAMS=--appFlags 0x240 --path "44'/131'" --path "44'/132'" --path "44'/281'"  --curve secp256k1 $(COMMON_LOAD_PARAMS) 
 
 APPVERSION_M=1
-APPVERSION_N=2
+APPVERSION_N=3
 APPVERSION_P=2
 
 APPVERSION=$(APPVERSION_M).$(APPVERSION_N).$(APPVERSION_P)
@@ -56,6 +56,9 @@ all: default
 DEFINES   += OS_IO_SEPROXYHAL
 DEFINES   += HAVE_BAGL HAVE_SPRINTF
 DEFINES   += HAVE_IO_USB HAVE_L4_USBLIB IO_USB_MAX_ENDPOINTS=6 IO_HID_EP_LENGTH=64 HAVE_USB_APDU
+#DEFINES   += HAVE_UX_FLOW
+DEFINES   += HAVE_LEGACY_PID
+
 DEFINES   +=  LEDGER_MAJOR_VERSION=$(APPVERSION_M) LEDGER_MINOR_VERSION=$(APPVERSION_N) LEDGER_PATCH_VERSION=$(APPVERSION_P)
 
 # U2F
@@ -119,11 +122,11 @@ endif
 CC       := $(CLANGPATH)clang 
 
 #CFLAGS   += -O0
-CFLAGS   += -O3 -Os
+CFLAGS   += -O3 -Os -I$(GCCPATH)/../arm-none-eabi/include/
 
 AS     := $(GCCPATH)arm-none-eabi-gcc
 LD       := $(GCCPATH)arm-none-eabi-gcc
-LDFLAGS  += -O3 -Os
+LDFLAGS  += -O3 -Os 
 LDLIBS   += -lm -lgcc -lc 
 
 # import rules to compile glyphs(/pone)

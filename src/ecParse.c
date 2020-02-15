@@ -17,7 +17,7 @@
 ********************************************************************************/
 
 #include "ecParse.h"
-
+#define WANT_REDUNDANT_EC_ADDRESS 0
 
 parserStatus_e parseEcTxV0(uint8_t *data, uint32_t length, txEcContent_t *context, uint32_t *offset)
 {
@@ -30,7 +30,7 @@ parserStatus_e parseEcTxV0(uint8_t *data, uint32_t length, txEcContent_t *contex
         goto error;
     }
 
-    context->timestamp_ms = &data[*offset];
+//    context->timestamp_ms = &data[*offset];
     *offset += 6;
 
     if ( *offset > length )
@@ -114,7 +114,7 @@ error:
 void initEcContent(txEcContent_t *content)
 {
     content->ecpubkey = 0;
-    content->timestamp_ms = 0;
+//    content->timestamp_ms = 0;
     content->entryhash = 0;
     content->numec = 0;
     content->version = 0;
